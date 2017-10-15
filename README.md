@@ -1,4 +1,4 @@
-# Symfony 3 + Webpack 3 + ReactJSv16 = Isomorphic WebApp
+# Symfony3+Webpack3+ReactJSv16 = Isomorphic WebApp
 
 This repository is based in the project by [Ryan Weaver](https://github.com/weaverryan) - symfonycat-js [Webpack Tutorial](https://github.com/weaverryan/symfonycat-js).
 
