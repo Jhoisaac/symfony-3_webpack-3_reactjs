@@ -17,4 +17,4 @@
 /node_modules/
 /web/build/
 /web/bundles/
-
+/.vagrant/

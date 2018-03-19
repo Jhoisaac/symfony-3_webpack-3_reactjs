@@ -1,0 +1,198 @@
+---
+- hosts: vb
+
+  vars:
+    server_name: mootube.l
+    symfony_root_dir: /var/www/project
+    symfony_web_dir: "{{ symfony_root_dir }}/web"
+    symfony_var_dir: "{{ symfony_root_dir }}/var"
+    symfony_console_path: "{{ symfony_root_dir }}/bin/console"
+
+  tasks:
+    - ping: ~
+
+    - name: Update APT package manager repositories cache
+      become: true
+      apt:
+        update_cache: yes
+
+    - name: Upgrade installed packages
+      become: true
+      apt:
+        upgrade: safe
+
+    - name: Install cowsay - it's probably important
+      become: true
+      apt:
+        name: cowsay
+
+    - name: Install Git VCS
+      become: true
+      apt:
+        name: git
+        state: latest
+
+    - name: Install Nginx web server
+      become: true
+      apt:
+        name: nginx
+        state: latest
+      notify: Restart Nginx
+
+    - name: Install MySQL DB server
+      become: true
+      apt:
+        name: mysql-server
+        state: latest
+
+    - name: Add PHP 7 PPA repository
+      become: true
+      apt_repository:
+        repo: 'ppa:ondrej/php'
+
+    - name: Install PHP CLI
+      become: true
+      apt:
+        name: php7.1-cli
+        state: latest
+
+    - name: Install PHP packages
+      become: true
+      apt:
+        name: "{{ item }}"
+        state: latest
+      with_items:
+        - php7.1-cli
+        - php7.1-curl
+        - php7.1-fpm
+        - php7.1-intl
+        - php7.1-mysql
+        - php7.1-xml
+      notify: Restart PHP-FPM
+
+    # - name: Set date.timezone for CLI
+    #   become: true
+    #   lineinfile:
+    #     path: /etc/php/7.1/cli/php.ini
+    #     regexp: "date.timezone ="
+    #     line: "date.timezone = UTC"
+
+    - name: Set date.timezone for PHP CLI
+      become: true
+      ini_file:
+        path: /etc/php/7.1/cli/php.ini
+        section: "{{ item.section }}"
+        option: "{{ item.option }}"
+        value: "{{ item.value }}"
+      with_items:
+        - { section: Date, option: date.timezone, value: Europe/Berlin }
+        - { section: PHP, option: max_execution_time, value: 60 }
+        - { section: PHP, option: memory_limit, value: 512M }
+
+    - name: Set date.timezone for PHP FPM
+      become: true
+      ini_file:
+        path: /etc/php/7.1/fpm/php.ini
+        section: "{{ item.section }}"
+        option: "{{ item.option }}"
+        value: "{{ item.value }}"
+      with_items:
+        - { section: Date, option: date.timezone, value: Europe/Berlin }
+        - { section: PHP, option: max_execution_time, value: 60 }
+        - { section: PHP, option: memory_limit, value: 512M }
+      notify: Restart PHP-FPM
+
+    - name: Create project directory and set its permissions
+      become: true
+      file:
+        path: "{{ symfony_root_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        recurse: yes
+
+     - name: Checkout Git repository
+       git:
+         repo: https://github.com/knpuniversity/ansible.git
+         dest: "{{ symfony_root_dir }}"
+         force: yes
+
+    - name: Install low-level utilities
+      become: true
+      apt:
+        name: "{{ item }}"
+      with_items:
+        - zip
+        - unzip
+
+    - name: Download Composer
+      script: scripts/install_composer.sh
+
+    - name: Move Composer globally
+      become: true
+      command: mv composer.phar /usr/local/bin/composer
+
+    - name: Set permissions on Composer
+      become: true
+      file:
+        path: /usr/local/bin/composer
+        mode: "a+x"
+
+    - name: Install Composer's dependencies
+      composer:
+        working_dir: "{{ symfony_root_dir }}"
+        no_dev: no
+
+    - name: Add Symfony config template to the Nginx available sites
+      become: true
+      template:
+        src: templates/symfony.conf
+        dest: "/etc/nginx/sites-available/{{ server_name }}.conf"
+      notify: Restart Nginx
+
+    - name: Enable Symfony config template from Nginx available sites
+      become: true
+      file:
+        src: "/etc/nginx/sites-available/{{ server_name }}.conf"
+        dest: "/etc/nginx/sites-enabled/{{ server_name }}.conf"
+        state: link
+      notify: Restart Nginx
+
+    - name: Add enabled Nginx site to /etc/hosts
+      become: true
+      lineinfile:
+        dest: /etc/hosts
+        regexp: "{{ server_name }}"
+        line: "127.0.0.1 {{ server_name }}"
+
+    - name: Fix var directory permissions
+      file:
+        path: "{{ symfony_var_dir }}"
+        state: directory
+        mode: 0777
+        recurse: yes
+
+    # Symfony console commands
+    - name: Create DB if not exists
+      command: '{{ symfony_console_path }} doctrine:database:create --if-not-exists'
+
+    - name: Execute migrations
+      command: '{{ symfony_console_path }} doctrine:migrations:migrate --no-interaction'
+
+    - name: Load data fixtures
+      command: '{{ symfony_console_path }} hautelook_alice:doctrine:fixtures:load --no-interaction'
+
+
+  handlers:
+    - name: Restart Nginx
+      become: true
+      service:
+        name: nginx
+        state: restarted
+
+    - name: Restart PHP-FPM
+      become: true
+      service:
+        name: php7.1-fpm
+        state: restarted
+
